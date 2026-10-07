@@ -47,10 +47,10 @@ function buildProjects(sections,timeline){
   for(let i=0;i<projectish.length;i+=2){const chunk=projectish.slice(i,i+2).join(' ');if(chunk.length>45)chunks.push(chunk);}
   const escRe=x=>x.replace(/[.*+?^{}()|[\]\\]/g,'\\$&');
   const explicit=chunks.slice(0,40).map(chunk=>{
-    const name=(chunk.match(/(?:project|product|platform|initiative|program|redesign|experience|dashboard|system)[:\\s-]+([^.;]{4,100})/i)||[])[1]||chunk.split(/[.!?]/)[0].slice(0,90);
+    const name=(chunk.match(/(?:project|product|platform|initiative|program|redesign|experience|dashboard|system)[:\s-]+([^.;]{4,100})/i)||[])[1]||chunk.split(/[.!?]/)[0].slice(0,90);
     const skills=SKILLS.filter(s=>new RegExp(escRe(s),'i').test(chunk));
     const related=timeline.find(t=>t.company&&chunk.toLowerCase().includes(t.company.toLowerCase()));
-    return{id:uuid(),name:name.trim(),company:related?.company||'',year:(chunk.match(/\\b20\\d{2}\\b/)||[])[0]||related?.startDate||'',startDate:related?.startDate||'',endDate:related?.endDate||'',client:'',industry:'',platform:'',deviceType:'',businessModel:'',audience:'',summary:chunk.slice(0,900),expectation:'',outcome:'',impact:'',skills,tools:[],methods:[],evidence:[chunk],source:'resume'};
+    return{id:uuid(),name:name.trim(),company:related?.company||'',year:(chunk.match(/\b20\\d{2}\\b/)||[])[0]||related?.startDate||'',startDate:related?.startDate||'',endDate:related?.endDate||'',client:'',industry:'',platform:'',deviceType:'',businessModel:'',audience:'',summary:chunk.slice(0,900),expectation:'',outcome:'',impact:'',skills,tools:[],methods:[],evidence:[chunk],source:'resume'};
   });
   if(explicit.length) return explicit;
   return timeline.map(t=>({id:uuid(),name:(t.role||'Career evidence')+(t.company?' at '+t.company:''),company:t.company||'',year:(t.startDate||'').match(/20\d{2}/)?.[0]||'',startDate:t.startDate||'',endDate:t.endDate||'',client:'',industry:'',platform:'',deviceType:'',businessModel:'',audience:'',summary:t.description||'',expectation:'',outcome:'',impact:'',skills:SKILLS.filter(s=>new RegExp(escRe(s),'i').test(t.description||'')),tools:[],methods:[],evidence:t.responsibilities||[],source:'resume'}));

@@ -13,7 +13,7 @@ let DB=null,timer=null;
 const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 function show(n){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));$('s'+n).classList.add('active');$('progress').style.width=(n===1?20:n===2?38:n===3?68:100)+'%';$('step').textContent=n===1?'CAREER EVIDENCE LAB':n===2?'01 / EVIDENCE':n===3?'02 / DEEP READING':'03 / CAREER MAP';window.scrollTo({top:0,behavior:'smooth'})}
 function toast(t){$('toast').innerHTML='<div class="toast">'+esc(t)+'</div>';setTimeout(()=>$('toast').innerHTML='',2500)}
-$('start').onclick=()=>show(2);$('pick').onclick=()=>$('file').click();$('file').onchange=()=>{if($('file').files[0])processFile($('file').files[0])};$('drop').ondragover=e=>e.preventDefault();$('drop').ondrop=e=>{e.preventDefault();if(e.dataTransfer.files[0])processFile(e.dataTransfer.files[0])};$('readUrl').onclick=readUrl;$('template').onclick=template;$('downloadJson').onclick=downloadJson;$('new').onclick=()=>show(2);
+$('start').onclick=()=>show(2);$('pick').onclick=()=>$('file').click();$('file').onchange=()=>{if($('file').files[0])processFile($('file').files[0])};$('drop').ondragover=e=>e.preventDefault();$('drop').ondrop=e=>{e.preventDefault();if(e.dataTransfer.files[0])processFile(e.dataTransfer.files[0])};$('readUrl').onclick=readUrl;$('template').onclick=template;$('new').onclick=()=>show(2);
 function beginLoading(){show(3);const start=Date.now();const stages=[['Extracting every line and section',15],['Reconstructing roles and dates',35],['Finding projects and initiatives',55],['Mapping skills, tools and methods',72],['Checking career patterns',88],['Building your JSON career database',100]];let i=0;clearInterval(timer);timer=setInterval(()=>{if(i<stages.length){$('ls').textContent=stages[i][0];$('lb').style.width=stages[i][1]+'%';$('lp').textContent=stages[i][1]+'%';i++;}},850);return start}
 async function processFile(file){const start=beginLoading();try{const b64=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=no;r.readAsDataURL(file)});const r=await fetch('/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,base64:b64})});const data=await r.json();if(!r.ok)throw Error(data.error||'Could not analyse the document');DB=data;const wait=Math.max(0,8000-(Date.now()-start));setTimeout(()=>{clearInterval(timer);$('lb').style.width='100%';$('lp').textContent='100%';$('ls').textContent='Career database ready';$('lt').textContent='Your evidence has been structured.';setTimeout(render,400)},wait)}catch(e){clearInterval(timer);$('lt').textContent='The document could not be read.';$('lc').textContent=e.message;$('ls').textContent='Try another document';toast(e.message)}}
 async function readUrl(){const url=$('url').value.trim();if(!url)return;const start=beginLoading();try{const x=await fetch('https://r.jina.ai/'+url);if(!x.ok)throw Error('Portfolio URL could not be read');const text=await x.text();const r=await fetch('/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:url,rawText:text})});const data=await r.json();if(!r.ok)throw Error(data.error||'Could not analyse the portfolio');DB=data;const wait=Math.max(0,8000-(Date.now()-start));setTimeout(()=>{clearInterval(timer);render()},wait)}catch(e){clearInterval(timer);show(2);toast(e.message)}}
@@ -22,38 +22,57 @@ function dist(a,k){const m={};a.forEach(x=>{const v=x[k]||'Not specified';m[v]=(
 function bars(d){if(!d.length)return'<p class="note">Not enough structured data.</p>';const max=d[0][1];return d.slice(0,8).map(x=>'<div class="barrow"><span>'+esc(x[0])+'</span><div class="bar"><i style="width:'+Math.round(x[1]/max*100)+'%"></i></div><b>'+x[1]+'</b></div>').join('')}
 function countText(source,term){if(!source||!term)return 0;const hay=source.toLowerCase(),needle=String(term).toLowerCase();let n=0,pos=0;while((pos=hay.indexOf(needle,pos))>-1){n++;pos+=needle.length;}return n;}
 function normalizeDB(){
-  DB=DB||{};
-  DB.timeline=Array.isArray(DB.timeline)?DB.timeline:[];
-  DB.projects=Array.isArray(DB.projects)?DB.projects:[];
-  DB.skills=Array.isArray(DB.skills)?DB.skills:[];
-  DB.education=Array.isArray(DB.education)?DB.education:[];
-  DB.certifications=Array.isArray(DB.certifications)?DB.certifications:[];
-  if(!DB.timeline.length&&DB.projects.length) DB.timeline=DB.projects.filter(x=>x.startDate||x.year).map(x=>({role:x.role||x.name||'Career evidence',company:x.company||'',startDate:x.startDate||x.year||'',endDate:x.endDate||'',description:x.summary||''}));
-  if(!DB.projects.length){
-    const src=[...(DB.sections?.projects||[]),...(DB.sections?.experience||[])].filter(x=>x&&x.length>35);
-    DB.projects=src.slice(0,40).map((x,i)=>{
-      const m=x.match(/(?:project|product|platform|initiative|program|redesign|experience|dashboard|system)[: -]+([^.;]{4,90})/i);
-      const name=m?.[1]||x.split(/[.!?]/)[0].slice(0,90);
-      const skills=DB.skills.map(z=>typeof z==='string'?z:z.name).filter(Boolean).filter(k=>x.toLowerCase().includes(String(k).toLowerCase()));
-      return{id:'derived_'+i,name,company:'',year:(x.match(/20[0-9]{2}/)||[])[0]||'',industry:'',platform:'',summary:x.slice(0,900),impact:'',skills,evidence:[x],source:'derived-from-json'};
-    });
-  }
+ DB=DB||{};
+ DB.timeline=Array.isArray(DB.timeline)?DB.timeline:[];
+ DB.projects=Array.isArray(DB.projects)?DB.projects:[];
+ DB.skills=Array.isArray(DB.skills)?DB.skills:[];
+ DB.education=Array.isArray(DB.education)?DB.education:[];
+ DB.certifications=Array.isArray(DB.certifications)?DB.certifications:[];
+ const sections=DB.sections||{};
+ const skillNames=DB.skills.map(x=>typeof x==='string'?x:x.name).filter(Boolean);
+ if(!DB.timeline.length&&DB.projects.length) DB.timeline=DB.projects.filter(x=>x.startDate||x.year).map(x=>({role:x.role||x.name||'Career evidence',company:x.company||'',startDate:x.startDate||x.year||'',endDate:x.endDate||'',description:x.summary||''}));
+ if(!DB.projects.length){
+   const src=[...(sections.projects||[]),...(sections.experience||[])].filter(x=>x&&x.length>35);
+   DB.projects=src.slice(0,60).map((x,i)=>({
+     id:'derived_'+i,name:(x.match(/(?:project|product|platform|initiative|program|redesign|experience|dashboard|system)[: -]+([^.;]{4,90})/i)||[])[1]||x.split(/[.!?]/)[0].slice(0,90),
+     company:'',year:(x.match(/20[0-9]{2}/)||[])[0]||'',startDate:'',endDate:'',client:'',industry:'',platform:'',
+     deviceType:'',businessModel:'',audience:'',summary:x.slice(0,900),expectation:'',outcome:'',impact:'',
+     skills:skillNames.filter(k=>x.toLowerCase().includes(String(k).toLowerCase())),tools:[],methods:[],evidence:[x],source:'derived evidence'
+   }));
+ }
+}
+function textOrBlank(v){return v===undefined||v===null||v===''?'':String(v)}
+function yesNo(v){if(v===true)return'<span class="yes">YES</span>';if(v===false)return'<span class="muted">NO</span>';return'<span class="muted">-</span>'}
+function workRows(projects){
+ return projects.map((x,i)=>{
+   const ev=String(x.evidence?.join(' ')||x.summary||'');
+   const has=(...terms)=>terms.some(t=>ev.toLowerCase().includes(t));
+   const research=x.research??has('research','user interview','usability','discovery');
+   const strategy=x.strategy??has('strategy','roadmap','product strategy','vision');
+   const design=x.design??has('design','interaction','visual','ux','ui');
+   const prototype=x.prototype??has('prototype','prototyp');
+   const testing=x.testing??has('test','validation','usability testing');
+   return '<tr><td><div class="project-name">'+esc(textOrBlank(x.name)||('Evidence record '+(i+1)))+'</div><div class="muted">'+esc(x.source||'')+'</div></td>'+
+   '<td>'+esc(textOrBlank(x.company))+'</td><td>'+esc(textOrBlank(x.startDate||x.year))+'</td><td>'+esc(textOrBlank(x.endDate))+'</td>'+
+   '<td>'+esc(textOrBlank(x.client))+'</td><td>'+esc(textOrBlank(x.expectation))+'</td><td>'+yesNo(research)+'</td><td>'+yesNo(strategy)+'</td><td>'+yesNo(design)+'</td><td>'+yesNo(prototype)+'</td><td>'+yesNo(testing)+'</td><td>'+esc(textOrBlank(x.outcome||x.impact))+'</td><td>'+esc(textOrBlank(x.industry))+'</td><td>'+esc(textOrBlank(x.businessModel||x.platform||x.deviceType))+'</td></tr>';
+ }).join('');
 }
 function render(){
-  normalizeDB();
-  show(4);
-  const p=filtered(),tl=DB.timeline||[],sk=DB.skills||[];
-  $('summary').textContent=(DB.person?.name?DB.person.name+' · ':'')+p.length+' projects · '+tl.length+' roles · '+sk.length+' skill signals · '+(DB.analysisMode||'structured');
-  $('stats').innerHTML=[['Projects',DB.projects.length],['Roles',tl.length],['Skills',sk.length],['Industries',dist(DB.projects,'industry').filter(x=>x[0]!=='Not specified').length],['Education',DB.education.length],['Source',DB.source?.filename?'1':'0']].map(x=>'<div class="stat"><b>'+esc(x[1])+'</b><span>'+x[0]+'</span></div>').join('');
-  fillFilters();
-  $('timeline').innerHTML=tl.length?tl.map(x=>'<div class="era"><b>'+esc(x.startDate||'?')+'</b><span>'+esc(x.endDate||'')+'</span><span>'+esc(x.role||'')+'</span><span>'+esc(x.company||'')+'</span></div>').join(''):'<p class="note">No dated roles confidently reconstructed.</p>';
-  $('footprint').innerHTML=bars(dist(DB.projects,'company'));
-  renderSkills(sk,p);
-  renderInsights(p);
-  renderEducation();
-  $('projects').innerHTML=p.length?p.map(x=>'<div class="project"><b>'+esc(x.name)+'</b><small>'+esc([x.company,x.year,x.industry,x.platform].filter(Boolean).join(' · '))+'</small><div class="chips">'+(x.skills||[]).slice(0,8).map(s=>'<span class="chip">'+esc(s)+'</span>').join('')+'</div><small>'+esc(x.summary||'')+'</small></div>').join(''):'<p class="note">No projects match these filters.</p>';
-  $('json').textContent=JSON.stringify(DB,null,2);
-  localStorage.setItem('lakshya-career-db',JSON.stringify(DB));
+ normalizeDB();show(4);
+ const p=filtered(),tl=DB.timeline||[],sk=DB.skills||[],source=String(DB.rawText||'');
+ $('summary').textContent=(DB.person?.name?DB.person.name+' · ':'')+DB.projects.length+' work records · '+tl.length+' roles · '+sk.length+' skill signals · '+(DB.analysisMode||'structured analysis');
+ $('stats').innerHTML=[['Work records',DB.projects.length],['Roles',tl.length],['Skills',sk.length],['Industries',dist(DB.projects,'industry').filter(x=>x[0]!=='Not specified').length],['Education',DB.education.length],['Evidence chars',source.length]].map(x=>'<div class="stat"><b>'+esc(x[1])+'</b><span>'+x[0]+'</span></div>').join('');
+ const years=tl.flatMap(x=>[x.startDate,x.endDate]).join(' ');
+ const first=(years.match(/20[0-9]{2}/)||[])[0], nums=years.match(/20[0-9]{2}/g)||[], last=nums.length?nums[nums.length-1]:'';
+ const skillHits=sk.reduce((n,x)=>n+countText(source,typeof x==='string'?x:x.name),0);
+ $('analysisStrip').innerHTML=[['Career span',first&&last?first+' → '+last:'Not enough date evidence'],['Evidence density',source.length>12000?'Rich':source.length>5000?'Moderate':'Sparse'],['Skill mentions',skillHits||'Not established'],['Analysis confidence',DB.analysisMode?.startsWith('ai')?'AI enriched':'Evidence based']].map(x=>'<div class="analysis-item"><span>'+x[0]+'</span><b>'+esc(x[1])+'</b></div>').join('');
+ fillFilters();
+ $('timeline').innerHTML=tl.length?tl.map(x=>'<div class="era"><b>'+esc(x.startDate||'?')+'</b><span>'+esc(x.endDate||'')+'</span><span>'+esc(x.role||'')+'</span><span>'+esc(x.company||'')+'</span></div>').join(''):'<p class="note">No dated roles confidently reconstructed.</p>';
+ $('footprint').innerHTML=bars(dist(DB.projects,'company'));
+ renderSkills(sk,p);renderInsights(p);renderEducation();
+ $('masterTable').innerHTML=workRows(p);
+ $('projects').innerHTML=p.length?p.map(x=>'<div class="project"><b>'+esc(x.name)+'</b><small>'+esc([x.company,x.startDate,x.endDate,x.industry,x.businessModel||x.platform].filter(Boolean).join(' · '))+'</small><div class="chips">'+(x.skills||[]).slice(0,8).map(s=>'<span class="chip">'+esc(s)+'</span>').join('')+'</div><small>'+esc(x.summary||x.evidence?.[0]||'')+'</small></div>').join(''):'<p class="note">No evidence records match these filters.</p>';
+ localStorage.setItem('lakshya-career-db',JSON.stringify(DB));
 }
 function fillFilters(){const vals=k=>[...new Set((DB.projects||[]).map(x=>x[k]).filter(Boolean))].sort();$('industry').innerHTML='<option value="">All industries</option>'+vals('industry').map(x=>'<option>'+esc(x)+'</option>').join('');$('company').innerHTML='<option value="">All companies</option>'+vals('company').map(x=>'<option>'+esc(x)+'</option>').join('')}
 function renderSkills(sk,p){

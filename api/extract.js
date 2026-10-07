@@ -102,5 +102,83 @@ function buildProjects(sections,timeline){
 }
 function deterministic(text,filename){const sections=extractSections(text),contact=extractContact(sections.header),timeline=extractExperience(sections.experience),skills=extractSkills(sections,text),education=extractEducation(sections.education),projects=buildProjects(sections,timeline);return{schemaVersion:'lakshya.career.v2',source:{filename,processedAt:new Date().toISOString(),parser:'wing-span-inspired server parser',characterCount:text.length},person:contact,rawText:text,sections,timeline,projects,skills,education,certifications:sections.certifications,awards:sections.awards,publications:sections.publications,signals:{careerStageSignals:timeline.map(t=>t.role).filter(Boolean),geographySignals:[],evidenceQuality:text.length>12000?'rich':text.length>5000?'moderate':'sparse'}};}
 async function parseBuffer(buffer,filename){const ext=(filename.split('.').pop()||'').toLowerCase();if(ext==='txt'||ext==='md'||ext==='csv')return buffer.toString('utf8');if(ext==='docx'){const mammoth=require('mammoth');return(await mammoth.extractRawText({buffer})).value;}if(ext==='xlsx'||ext==='xls'){const XLSX=require('xlsx'),wb=XLSX.read(buffer,{type:'buffer'});return wb.SheetNames.map(n=>'--- Sheet: '+n+' ---\n'+XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n');}if(ext==='pdf'){const{extractText}=await import('unpdf');const result=await extractText(new Uint8Array(buffer),{mergePages:true});return Array.isArray(result.text)?result.text.join('\n'):result.text||'';}throw new Error('Unsupported file type: '+ext);}
-async function aiEnrich(db){const key=process.env.GEMINI_API_KEY||process.env.OPENROUTER_API_KEY;if(!key)return{...db,analysisMode:'structured-parser'};const isOpenRouter=!!process.env.OPENROUTER_API_KEY&&!process.env.GEMINI_API_KEY;const prompt='You are the extraction engine for Lakshya Career Evidence Lab. Transform the supplied resume extraction into a comprehensive structured career database. Do not invent facts. Preserve every factual item from rawText and sections. Identify every distinct role, company, project, product, client, initiative, date, education item, certification, award, publication, skill, tool, method, domain, industry, platform and measurable outcome. Unknown values must be empty. Return ONLY JSON with person, timeline, projects, skills, education, certifications, awards, publications, domains, industries, tools, rawText, sections, signals. timeline entries need id, role, company, startDate, endDate, description, responsibilities, achievements, location, employmentType. projects need id,name,company,year,startDate,endDate,client,industry,platform,deviceType,businessModel,audience,summary,expectation,outcome,impact,skills,tools,methods,evidence. skills need name,type,evidence,frequency,confidence.\n\nSOURCE DATABASE:\n'+JSON.stringify(db);let url,body;if(isOpenRouter){url='https://openrouter.ai/api/v1/chat/completions';body={model:'openai/gpt-oss-120b',temperature:0,response_format:{type:'json_object'},messages:[{role:'system',content:'Return only valid JSON.'},{role:'user',content:prompt}]};}else{url='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+encodeURIComponent(key);body={generationConfig:{temperature:0,responseMimeType:'application/json'},contents:[{role:'user',parts:[{text:prompt}]}]};}const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!res.ok)throw new Error('AI enrichment failed: '+res.status);const j=await res.json(),content=isOpenRouter?j.choices?.[0]?.message?.content:j.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('');if(!content)throw new Error('AI enrichment returned no content');return{...db,...JSON.parse(String(content).replace(/^```json\s*/,'').replace(/```$/,'').trim()),analysisMode:isOpenRouter?'ai-openrouter':'ai-gemini',rawText:db.rawText};}
+function parseAIJson(content){
+  let text=String(content||'').trim();
+  text=text.replace(/^\uFEFF/,'').replace(/^\`\`\`(?:json)?/i,'').replace(/\`\`\`$/,'').trim();
+  try{return JSON.parse(text);}catch(_){}
+  const first=text.indexOf('{'),last=text.lastIndexOf('}');
+  if(first>=0&&last>first){try{return JSON.parse(text.slice(first,last+1));}catch(_){}}
+  return null;
+}
+async function callGemini(key,prompt,model){
+  const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key);
+  const body={generationConfig:{temperature:0,responseMimeType:'application/json'},contents:[{role:'user',parts:[{text:prompt}]}]};
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const raw=await res.text();
+  if(!res.ok) throw new Error('Gemini '+model+' HTTP '+res.status);
+  let j;try{j=JSON.parse(raw);}catch(_){throw new Error('Gemini returned invalid response');}
+  const content=j.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')||'';
+  const parsed=parseAIJson(content);
+  if(!parsed) throw new Error('Gemini returned non-JSON analysis');
+  return parsed;
+}
+async function callOpenRouter(key,prompt){
+  const url='https://openrouter.ai/api/v1/chat/completions';
+  const body={model:process.env.LAKSHYA_OPENROUTER_MODEL||'openai/gpt-oss-120b',temperature:0,response_format:{type:'json_object'},messages:[{role:'system',content:'Return only valid JSON. Never wrap JSON in markdown.'},{role:'user',content:prompt}]};
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
+  const raw=await res.text();
+  if(!res.ok) throw new Error('OpenRouter HTTP '+res.status);
+  let j;try{j=JSON.parse(raw);}catch(_){throw new Error('OpenRouter returned invalid response');}
+  const content=j.choices?.[0]?.message?.content||'';
+  const parsed=parseAIJson(content);
+  if(!parsed) throw new Error('OpenRouter returned non-JSON analysis');
+  return parsed;
+}
+async function aiEnrich(db){
+  const geminiKey=process.env.GEMINI_API_KEY;
+  const openKey=process.env.OPENROUTER_API_KEY;
+  if(!geminiKey&&!openKey)return{...db,analysisMode:'structured-parser'};
+  const prompt=`You are Lakshya Career Evidence Lab's senior career-data analyst. Build a rigorous career evidence database from the supplied source.
+
+Rules:
+1. Preserve facts exactly. Never invent a company, role, project, client, date, industry, skill, outcome, rating or method.
+2. First understand the document hierarchy. A company can contain multiple roles; a role can contain multiple projects or initiatives. Do not turn every responsibility bullet into a project.
+3. Extract every explicit project/work item. If the source only describes a responsibility and no distinct project exists, keep it as role evidence rather than inventing a project title.
+4. Keep dates attached to the correct role or project. Do not copy one role's dates onto unrelated projects unless the source clearly connects them.
+5. Separate FACT from INFERENCE. Inference can be included only in signals and must clearly state that it is inferred.
+6. For project fields that are not supported by evidence, return an empty string or empty array.
+7. Skills must be evidence-backed. Count frequency from the source, not from the generated interpretation.
+8. Return comprehensive structured JSON only.
+
+Return exactly these top-level fields:
+person, timeline, projects, skills, education, certifications, awards, publications, domains, industries, tools, signals, sections, rawText.
+
+timeline item:
+{id, role, company, startDate, endDate, description, responsibilities[], achievements[], location, employmentType}
+
+project item:
+{id, name, company, role, startDate, endDate, client, industry, platform, deviceType, businessModel, audience, expectation, process[], outcome, impact, skills[], tools[], methods[], evidence[]}
+
+skill item:
+{name, type, evidence[], frequency, confidence}
+
+signals should contain only defensible analysis such as career themes, recurring domains, progression patterns, evidence gaps and notable strengths.
+
+SOURCE:
+${db.rawText}`;
+  let enriched=null,lastError='';
+  if(geminiKey){
+    for(const model of [process.env.LAKSHYA_GEMINI_MODEL||'gemini-2.5-flash','gemini-2.0-flash']){
+      try{enriched=await callGemini(geminiKey,prompt,model);break;}catch(e){lastError=e.message||String(e);}
+    }
+  }
+  if(!enriched&&openKey){
+    try{enriched=await callOpenRouter(openKey,prompt);}catch(e){lastError=e.message||String(e);}
+  }
+  if(!enriched){
+    console.error('Lakshya AI enrichment unavailable:',lastError);
+    return{...db,analysisMode:'structured-parser',analysisWarning:'AI enrichment unavailable; deterministic evidence extraction used.'};
+  }
+  return{...db,...enriched,analysisMode:geminiKey?'ai-gemini':'ai-openrouter',rawText:db.rawText,source:db.source};
+}
 module.exports=async function handler(req,res){if(req.method!=='POST')return res.status(405).json({error:'POST only'});try{const{filename,base64,rawText}=req.body||{};if(!filename&&!rawText)return res.status(400).json({error:'No document supplied'});const text=rawText||await parseBuffer(Buffer.from(base64,'base64'),filename);if(cleanText(text).length<80)return res.status(422).json({error:'The document was read, but there is not enough text to analyse. This usually means the PDF is scanned/image-only.'});const db=deterministic(text,filename||'pasted-text');const enriched=await aiEnrich(db);return res.status(200).json(enriched);}catch(e){console.error('Lakshya extraction error',e);return res.status(500).json({error:e?.message||'Extraction failed'});}};

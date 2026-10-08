@@ -79,106 +79,17 @@ function extractExperience(section){
 function extractSkills(sections,text){const found=new Set(),skillText=[...sections.skills,...sections.header].join(' ').toLowerCase();for(const skill of SKILLS){const aliases=[skill.toLowerCase()];if(skill==='Generative AI')aliases.push('gen ai','generative artificial intelligence');if(skill==='AI / ML')aliases.push('artificial intelligence','machine learning');if(skill==='Visual design')aliases.push('visual ui','ui design');if(skill==='Interaction design')aliases.push('interaction');if(skill==='User research')aliases.push('ux research');if(skill==='Design systems')aliases.push('design system');if(aliases.some(a=>skillText.includes(a)))found.add(skill);}const all=text.toLowerCase();for(const skill of SKILLS){const aliases=[skill.toLowerCase()];if(skill==='Generative AI')aliases.push('gen ai');if(skill==='AI / ML')aliases.push('artificial intelligence','machine learning');const hits=aliases.reduce((n,a)=>n+(all.match(new RegExp(a.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'))||[]).length,0);if(hits>=2)found.add(skill);}return[...found];}
 function extractEducation(section){return section.filter(x=>/(university|college|institute|school|academy|bachelor|master|b\.tech|m\.tech|mba|mfa|bfa|phd|degree|diploma)/i.test(x)).slice(0,12).map(line=>({institution:line,degree:'',year:(line.match(/\b20\d{2}\b/)||[])[0]||''}));}
 function buildProjects(sections,timeline){
-  const escRe=x=>x.replace(/[.*+?^{}()|[\]\\]/g,'\\function buildProjects(sections,timeline){
-  const sources=[...sections.projects,...sections.experience];
-  const projectish=sources.filter(x=>/(redesign|designed|built|launched|led|created|developed|implemented|platform|product|app|website|system|dashboard|service|experience|initiative|program|project|client|customer|strategy|research|design)/i.test(x));
-  const chunks=[];
-  for(let i=0;i<projectish.length;i+=2){const chunk=projectish.slice(i,i+2).join(' ');if(chunk.length>45)chunks.push(chunk);}
-  const escRe=x=>x.replace(/[.*+?^{}()|[\]\\]/g,'\\$&');
-  const explicit=chunks.slice(0,40).map(chunk=>{
-    const name=(chunk.match(/(?:project|product|platform|initiative|program|redesign|experience|dashboard|system)[:\s-]+([^.;]{4,100})/i)||[])[1]||chunk.split(/[.!?]/)[0].slice(0,90);
-    const skills=SKILLS.filter(s=>new RegExp(escRe(s),'i').test(chunk));
-    const related=timeline.find(t=>t.company&&chunk.toLowerCase().includes(t.company.toLowerCase()));
-    return{id:uuid(),name:name.trim(),company:related?.company||'',year:(chunk.match(/\b20\\d{2}\\b/)||[])[0]||related?.startDate||'',startDate:related?.startDate||'',endDate:related?.endDate||'',client:'',industry:'',platform:'',deviceType:'',businessModel:'',audience:'',summary:chunk.slice(0,900),expectation:'',outcome:'',impact:'',skills,tools:[],methods:[],evidence:[chunk],source:'resume'};
-  });
-  if(explicit.length) return explicit;
-  return timeline.map(t=>({id:uuid(),name:(t.role||'Career evidence')+(t.company?' at '+t.company:''),company:t.company||'',year:(t.startDate||'').match(/20\d{2}/)?.[0]||'',startDate:t.startDate||'',endDate:t.endDate||'',client:'',industry:'',platform:'',deviceType:'',businessModel:'',audience:'',summary:t.description||'',expectation:'',outcome:'',impact:'',skills:SKILLS.filter(s=>new RegExp(escRe(s),'i').test(t.description||'')),tools:[],methods:[],evidence:t.responsibilities||[],source:'resume'}));
-}');
-  const make=(chunk,related,i,source)=>{const clean=String(chunk).replace(/^[-•*]+\\s*/,'').trim();const name=(clean.match(/(?:project|product|platform|initiative|program|redesign|experience|dashboard|system)[:\\s-]+([^.;]{4,100})/i)||[])[1]||clean.split(/[.!?]/)[0].slice(0,100);const skills=SKILLS.filter(s=>new RegExp(escRe(s),'i').test(clean));return{id:uuid(),name:name.trim(),company:related?.company||'',year:(clean.match(/\\b20\\d{2}\\b/)||[])[0]||related?.startDate||'',startDate:related?.startDate||'',endDate:related?.endDate||'',client:'',industry:'',platform:'',deviceType:'',businessModel:'',audience:'',summary:clean.slice(0,900),expectation:'',outcome:'',impact:'',skills,tools:[],methods:[],evidence:[clean],source};};
-  if(sections.projects?.length){
-    return sections.projects.filter(x=>x.length>25).slice(0,60).map((x,i)=>make(x,timeline.find(t=>t.company&&x.toLowerCase().includes(t.company.toLowerCase())),i,'resume-projects'));
-  }
-  return timeline.map((t,i)=>make(t.description||t.role,t,i,'resume-role-evidence'));
+ const escRe=x=>String(x||'').replace(/[.*+?^{}()|[\]\\]/g,'\\$&');
+ const make=(chunk,related,i,source)=>{
+   const clean=String(chunk).replace(/^[-•*]+\s*/,'').replace(/\s+/g,' ').trim();
+   const explicit=(clean.match(/(?:project|product|platform|initiative|program|redesign|case study|experience)[:\s-]+([^.;]{4,100})/i)||[])[1];
+   const name=(explicit||clean.split(/[.!?]/)[0]).trim().slice(0,110);
+   const skills=SKILLS.filter(s=>new RegExp(escRe(s),'i').test(clean));
+   return{id:uuid(),name,company:related?.company||'',role:related?.role||'',startDate:related?.startDate||'',endDate:related?.endDate||'',client:'',industry:'',platform:'',deviceType:'',businessModel:'',audience:'',summary:clean.slice(0,900),expectation:'',process:[],outcome:'',impact:'',skills,tools:[],methods:[],evidence:[clean],source};
+ };
+ if(sections.projects?.length) return sections.projects.filter(x=>x.length>25).slice(0,80).map((x,i)=>make(x,timeline.find(t=>t.company&&x.toLowerCase().includes(t.company.toLowerCase())),i,'resume-project'));
+ return timeline.flatMap(t=>(t.responsibilities||[]).slice(0,12).map((x,i)=>make(x,t,i,'role-evidence')));
 }
 function deterministic(text,filename){const sections=extractSections(text),contact=extractContact(sections.header),timeline=extractExperience(sections.experience),skills=extractSkills(sections,text),education=extractEducation(sections.education),projects=buildProjects(sections,timeline);return{schemaVersion:'lakshya.career.v2',source:{filename,processedAt:new Date().toISOString(),parser:'wing-span-inspired server parser',characterCount:text.length},person:contact,rawText:text,sections,timeline,projects,skills,education,certifications:sections.certifications,awards:sections.awards,publications:sections.publications,signals:{careerStageSignals:timeline.map(t=>t.role).filter(Boolean),geographySignals:[],evidenceQuality:text.length>12000?'rich':text.length>5000?'moderate':'sparse'}};}
 async function parseBuffer(buffer,filename){const ext=(filename.split('.').pop()||'').toLowerCase();if(ext==='txt'||ext==='md'||ext==='csv')return buffer.toString('utf8');if(ext==='docx'){const mammoth=require('mammoth');return(await mammoth.extractRawText({buffer})).value;}if(ext==='xlsx'||ext==='xls'){const XLSX=require('xlsx'),wb=XLSX.read(buffer,{type:'buffer'});return wb.SheetNames.map(n=>'--- Sheet: '+n+' ---\n'+XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n');}if(ext==='pdf'){const{extractText}=await import('unpdf');const result=await extractText(new Uint8Array(buffer),{mergePages:true});return Array.isArray(result.text)?result.text.join('\n'):result.text||'';}throw new Error('Unsupported file type: '+ext);}
-function parseAIJson(content){
-  let text=String(content||'').trim();
-  text=text.replace(/^\uFEFF/,'').replace(/^\`\`\`(?:json)?/i,'').replace(/\`\`\`$/,'').trim();
-  try{return JSON.parse(text);}catch(_){}
-  const first=text.indexOf('{'),last=text.lastIndexOf('}');
-  if(first>=0&&last>first){try{return JSON.parse(text.slice(first,last+1));}catch(_){}}
-  return null;
-}
-async function callGemini(key,prompt,model){
-  const url='https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+encodeURIComponent(key);
-  const body={generationConfig:{temperature:0,responseMimeType:'application/json'},contents:[{role:'user',parts:[{text:prompt}]}]};
-  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const raw=await res.text();
-  if(!res.ok) throw new Error('Gemini '+model+' HTTP '+res.status);
-  let j;try{j=JSON.parse(raw);}catch(_){throw new Error('Gemini returned invalid response');}
-  const content=j.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')||'';
-  const parsed=parseAIJson(content);
-  if(!parsed) throw new Error('Gemini returned non-JSON analysis');
-  return parsed;
-}
-async function callOpenRouter(key,prompt){
-  const url='https://openrouter.ai/api/v1/chat/completions';
-  const body={model:process.env.LAKSHYA_OPENROUTER_MODEL||'openai/gpt-oss-120b',temperature:0,response_format:{type:'json_object'},messages:[{role:'system',content:'Return only valid JSON. Never wrap JSON in markdown.'},{role:'user',content:prompt}]};
-  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
-  const raw=await res.text();
-  if(!res.ok) throw new Error('OpenRouter HTTP '+res.status);
-  let j;try{j=JSON.parse(raw);}catch(_){throw new Error('OpenRouter returned invalid response');}
-  const content=j.choices?.[0]?.message?.content||'';
-  const parsed=parseAIJson(content);
-  if(!parsed) throw new Error('OpenRouter returned non-JSON analysis');
-  return parsed;
-}
-async function aiEnrich(db){
-  const geminiKey=process.env.GEMINI_API_KEY;
-  const openKey=process.env.OPENROUTER_API_KEY;
-  if(!geminiKey&&!openKey)return{...db,analysisMode:'structured-parser'};
-  const prompt=`You are Lakshya Career Evidence Lab's senior career-data analyst. Build a rigorous career evidence database from the supplied source.
-
-Rules:
-1. Preserve facts exactly. Never invent a company, role, project, client, date, industry, skill, outcome, rating or method.
-2. First understand the document hierarchy. A company can contain multiple roles; a role can contain multiple projects or initiatives. Do not turn every responsibility bullet into a project.
-3. Extract every explicit project/work item. If the source only describes a responsibility and no distinct project exists, keep it as role evidence rather than inventing a project title.
-4. Keep dates attached to the correct role or project. Do not copy one role's dates onto unrelated projects unless the source clearly connects them.
-5. Separate FACT from INFERENCE. Inference can be included only in signals and must clearly state that it is inferred.
-6. For project fields that are not supported by evidence, return an empty string or empty array.
-7. Skills must be evidence-backed. Count frequency from the source, not from the generated interpretation.
-8. Return comprehensive structured JSON only.
-
-Return exactly these top-level fields:
-person, timeline, projects, skills, education, certifications, awards, publications, domains, industries, tools, signals, sections, rawText.
-
-timeline item:
-{id, role, company, startDate, endDate, description, responsibilities[], achievements[], location, employmentType}
-
-project item:
-{id, name, company, role, startDate, endDate, client, industry, platform, deviceType, businessModel, audience, expectation, process[], outcome, impact, skills[], tools[], methods[], evidence[]}
-
-skill item:
-{name, type, evidence[], frequency, confidence}
-
-signals should contain only defensible analysis such as career themes, recurring domains, progression patterns, evidence gaps and notable strengths.
-
-SOURCE:
-${db.rawText}`;
-  let enriched=null,lastError='';
-  if(geminiKey){
-    for(const model of [process.env.LAKSHYA_GEMINI_MODEL||'gemini-2.5-flash','gemini-2.0-flash']){
-      try{enriched=await callGemini(geminiKey,prompt,model);break;}catch(e){lastError=e.message||String(e);}
-    }
-  }
-  if(!enriched&&openKey){
-    try{enriched=await callOpenRouter(openKey,prompt);}catch(e){lastError=e.message||String(e);}
-  }
-  if(!enriched){
-    console.error('Lakshya AI enrichment unavailable:',lastError);
-    return{...db,analysisMode:'structured-parser',analysisWarning:'AI enrichment unavailable; deterministic evidence extraction used.'};
-  }
-  return{...db,...enriched,analysisMode:geminiKey?'ai-gemini':'ai-openrouter',rawText:db.rawText,source:db.source};
-}
-module.exports=async function handler(req,res){if(req.method!=='POST')return res.status(405).json({error:'POST only'});try{const{filename,base64,rawText}=req.body||{};if(!filename&&!rawText)return res.status(400).json({error:'No document supplied'});const text=rawText||await parseBuffer(Buffer.from(base64,'base64'),filename);if(cleanText(text).length<80)return res.status(422).json({error:'The document was read, but there is not enough text to analyse. This usually means the PDF is scanned/image-only.'});const db=deterministic(text,filename||'pasted-text');const enriched=await aiEnrich(db);return res.status(200).json(enriched);}catch(e){console.error('Lakshya extraction error',e);return res.status(500).json({error:e?.message||'Extraction failed'});}};
+module.exports=async function handler(req,res){if(req.method!=='POST')return res.status(405).json({error:'POST only'});try{const{filename,base64,rawText}=req.body||{};if(!filename&&!rawText)return res.status(400).json({error:'No document supplied'});const text=rawText||await parseBuffer(Buffer.from(base64,'base64'),filename);if(cleanText(text).length<80)return res.status(422).json({error:'The document was read, but there is not enough text to analyse. This usually means the PDF is scanned/image-only.'});const db=deterministic(text,filename||'pasted-text');return res.status(200).json(db);}catch(e){console.error('Lakshya extraction error',e);return res.status(500).json({error:e?.message||'Extraction failed'});}};
